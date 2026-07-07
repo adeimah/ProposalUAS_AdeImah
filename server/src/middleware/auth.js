@@ -23,7 +23,7 @@ export const authMiddleware = async (req, res, next) => {
 
     // Fetch user from DB, excluding password
     const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
+      where: { id: parseInt(decoded.id, 10) },
       select: {
         id: true,
         name: true,

@@ -19,7 +19,7 @@ const GoalDetail = () => {
   const navigate = useNavigate();
   
   const { 
-    goals, 
+    currentUser,
     allDeposits, 
     updateGoal, 
     deleteGoal, 
@@ -29,15 +29,56 @@ const GoalDetail = () => {
     triggerToast
   } = useContext(AppContext);
 
-  // Find current goal
-  const goal = goals.find(g => g.id === id);
+  const [goal, setGoal] = useState(null);
+  const [loadingGoal, setLoadingGoal] = useState(true);
 
-  // Redirect if goal not found
-  useEffect(() => {
-    if (!goal && goals.length > 0) {
-      navigate('/dashboard');
+  // Read query parameter to enforce Read Only mode when navigated from Dashboard My Goals
+  const readOnly = new URLSearchParams(window.location.search).get('readOnly') === 'true';
+
+  const updateGoalDetails = (resData) => {
+    if (resData.success) {
+      const apiGoal = resData.data.savingGoal;
+      const formatDate = (dateStr) => {
+        if (!dateStr) return '';
+        return dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+      };
+      setGoal({
+        id: apiGoal.id.toString(),
+        name: apiGoal.title,
+        targetAmount: Number(apiGoal.targetAmount),
+        currentAmount: Number(apiGoal.currentAmount || 0),
+        category: apiGoal.category || getGoalCategory(apiGoal.title).type,
+        deadline: formatDate(apiGoal.deadline),
+        createdAt: formatDate(apiGoal.createdAt) || 'N/A'
+      });
     }
-  }, [goal, goals, navigate]);
+  };
+
+  // Fetch target saving goal from backend
+  useEffect(() => {
+    const fetchGoalDetail = async () => {
+      if (!currentUser) return;
+      try {
+        const response = await fetch(`http://localhost:5000/api/savings/${id}`, {
+          headers: {
+            'Authorization': `Bearer ${currentUser.token}`
+          }
+        });
+        const resData = await response.json();
+        if (resData.success) {
+          updateGoalDetails(resData);
+        } else {
+          navigate('/dashboard');
+        }
+      } catch (err) {
+        console.error('Fetch goal detail error:', err);
+        navigate('/dashboard');
+      } finally {
+        setLoadingGoal(false);
+      }
+    };
+    fetchGoalDetail();
+  }, [id, currentUser, navigate]);
 
   // Modals visibility state
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -62,7 +103,7 @@ const GoalDetail = () => {
     }
   }, [goal]);
 
-  if (!goal) {
+  if (loadingGoal || !goal) {
     return (
       <div className="loading-container text-center">
         <h3>Memuat target...</h3>
@@ -70,8 +111,10 @@ const GoalDetail = () => {
     );
   }
 
-  // Get progress and stats
-  const { totalDeposited, percent, remaining } = getGoalProgress(goal.id);
+  // Get progress and stats dynamically from goal details
+  const totalDeposited = Number(goal.currentAmount || 0);
+  const percent = Math.min(100, Math.round((totalDeposited / goal.targetAmount) * 100 * 10) / 10);
+  const remaining = Math.max(0, goal.targetAmount - totalDeposited);
   const estimasi = getEstimasiSelesai(goal.id);
   const goalDeposits = allDeposits.filter(d => d.goalId === goal.id);
   
@@ -79,7 +122,7 @@ const GoalDetail = () => {
   const cat = getGoalCategory(goal.name);
   const IconComponent = cat.icon;
 
-  const handleEditGoal = (e) => {
+  const handleEditGoal = async (e) => {
     e.preventDefault();
     
     const targetNum = parseFloat(editTarget);
@@ -88,13 +131,30 @@ const GoalDetail = () => {
       return;
     }
 
-    const done = updateGoal(goal.id, editName, targetNum, editDeadline);
+    const done = await updateGoal(goal.id, editName, targetNum, editDeadline);
     if (done) {
       setIsEditModalOpen(false);
+      // Reload goal detail
+      setLoadingGoal(true);
+      try {
+        const response = await fetch(`http://localhost:5000/api/savings/${id}`, {
+          headers: {
+            'Authorization': `Bearer ${currentUser.token}`
+          }
+        });
+        const resData = await response.json();
+        if (resData.success) {
+          updateGoalDetails(resData);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoadingGoal(false);
+      }
     }
   };
 
-  const handleAddDeposit = (e) => {
+  const handleAddDeposit = async (e) => {
     e.preventDefault();
     
     const amountNum = parseFloat(depAmount);
@@ -103,18 +163,35 @@ const GoalDetail = () => {
       return;
     }
 
-    const done = addDeposit(goal.id, depAmount, depDate, depNote);
+    const done = await addDeposit(goal.id, depAmount, depDate, depNote);
     if (done) {
       setDepAmount('');
       setDepNote('');
       setDepDate(new Date().toISOString().split('T')[0]);
       setIsDepositModalOpen(false);
+      // Reload goal detail
+      setLoadingGoal(true);
+      try {
+        const response = await fetch(`http://localhost:5000/api/savings/${id}`, {
+          headers: {
+            'Authorization': `Bearer ${currentUser.token}`
+          }
+        });
+        const resData = await response.json();
+        if (resData.success) {
+          updateGoalDetails(resData);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoadingGoal(false);
+      }
     }
   };
 
-  const handleDeleteGoal = () => {
+  const handleDeleteGoal = async () => {
     if (window.confirm(`Apakah Anda yakin ingin menghapus target "${goal.name}" beserta seluruh riwayat setorannya?`)) {
-      const done = deleteGoal(goal.id);
+      const done = await deleteGoal(goal.id);
       if (done) {
         navigate('/dashboard');
       }
@@ -155,14 +232,16 @@ const GoalDetail = () => {
             </div>
             <p className="goal-created-date">Dibuat pada: {goal.createdAt}</p>
           </div>
-          <div className="goal-detail-actions">
-            <button className="btn btn-secondary btn-icon-only" onClick={() => setIsEditModalOpen(true)} title="Ubah Target">
-              <Edit size={16} />
-            </button>
-            <button className="btn btn-danger btn-icon-only" onClick={handleDeleteGoal} title="Hapus Target" style={{ backgroundColor: 'var(--danger)' }}>
-              <Trash2 size={16} />
-            </button>
-          </div>
+          {!readOnly && (
+            <div className="goal-detail-actions">
+              <button className="btn btn-secondary btn-icon-only" onClick={() => setIsEditModalOpen(true)} title="Ubah Target">
+                <Edit size={16} />
+              </button>
+              <button className="btn btn-danger btn-icon-only" onClick={handleDeleteGoal} title="Hapus Target" style={{ backgroundColor: 'var(--danger)' }}>
+                <Trash2 size={16} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Progress Metrics (BR-3) */}
@@ -211,7 +290,7 @@ const GoalDetail = () => {
           </div>
         </div>
 
-        {percent < 100 && (
+        {!readOnly && percent < 100 && (
           <div className="goal-detail-cta">
             <button className="btn btn-accent btn-large" onClick={() => setIsDepositModalOpen(true)} style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
               <Plus size={20} />
@@ -232,7 +311,7 @@ const GoalDetail = () => {
             <FileText size={48} style={{ color: 'var(--text-light)', marginBottom: '0.75rem' }} />
             <h3>Belum Ada Setoran</h3>
             <p>Mulai catat setoran pertama Anda untuk mendekati target impian.</p>
-            {percent < 100 && (
+            {!readOnly && percent < 100 && (
               <button className="btn btn-secondary" style={{ marginTop: '1rem' }} onClick={() => setIsDepositModalOpen(true)}>
                 <Plus size={16} />
                 <span>Tambah Setoran Pertama</span>

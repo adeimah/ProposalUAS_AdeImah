@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 const TambahTabungan = () => {
-  const { goals, addDeposit, getGoalProgress, triggerToast } = useContext(AppContext);
+  const { currentUser, addDeposit, triggerToast } = useContext(AppContext);
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
@@ -24,11 +24,28 @@ const TambahTabungan = () => {
   const [note, setNote] = useState('');
   const [uploadedFile, setUploadedFile] = useState(null);
 
-  // Filter out completed goals (only show active/running goals)
-  const activeGoals = goals.filter(g => {
-    const { percent } = getGoalProgress(g.id);
-    return percent < 100;
-  });
+  // Local state for goals fetched from the GET /api/savings endpoint
+  const [goalsList, setGoalsList] = useState([]);
+
+  React.useEffect(() => {
+    const fetchAllGoals = async () => {
+      if (!currentUser) return;
+      try {
+        const response = await fetch('http://localhost:5000/api/savings', {
+          headers: {
+            'Authorization': `Bearer ${currentUser.token}`
+          }
+        });
+        const data = await response.json();
+        if (data.success) {
+          setGoalsList(data.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch goals:', err);
+      }
+    };
+    fetchAllGoals();
+  }, [currentUser]);
 
   // Handle file select
   const handleFileChange = (e) => {
@@ -65,7 +82,7 @@ const TambahTabungan = () => {
   };
 
   // Submit Handler
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!selectedGoalId) {
@@ -79,7 +96,7 @@ const TambahTabungan = () => {
       return;
     }
 
-    const success = addDeposit(selectedGoalId, amount, date, note);
+    const success = await addDeposit(selectedGoalId, amount, date, note);
     if (success) {
       // Clear form
       setSelectedGoalId('');
@@ -136,8 +153,10 @@ const TambahTabungan = () => {
                   required
                 >
                   <option value="">-- Pilih Target --</option>
-                  {activeGoals.map(g => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
+                  {goalsList.map(item => (
+                    <option key={item.savingGoal.id} value={item.savingGoal.id}>
+                      {item.savingGoal.title}
+                    </option>
                   ))}
                 </select>
               </div>

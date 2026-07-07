@@ -95,8 +95,16 @@ const Dashboard = () => {
     success,
     setError,
     setSuccess,
-    triggerToast
+    triggerToast,
+    dashboardData,
+    fetchDashboard
   } = useContext(AppContext);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchDashboard();
+    }
+  }, []);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -106,39 +114,13 @@ const Dashboard = () => {
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const userDetail = users.find(u => u.id === currentUser?.id) || {};
 
-  // Add Goal Form state
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [goalName, setGoalName] = useState('');
-  const [targetAmount, setTargetAmount] = useState('');
-  const [deadline, setDeadline] = useState('');
-
-  // Handle URL trigger from sidebar (?add=true)
+  // Handle URL trigger from sidebar (?add=true) -> Redirect to goals list page
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('add') === 'true') {
-      setError(null);
-      setSuccess(null);
-      setIsModalOpen(true);
+      navigate('/goals?add=true', { replace: true });
     }
-  }, [location.search, setError, setSuccess]);
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    if (location.search.includes('add=true')) {
-      navigate('/dashboard', { replace: true });
-    }
-  };
-
-  const handleCreateGoal = (e) => {
-    e.preventDefault();
-    const done = addGoal(goalName, targetAmount, deadline);
-    if (done) {
-      setGoalName('');
-      setTargetAmount('');
-      setDeadline('');
-      handleCloseModal();
-    }
-  };
+  }, [location.search, navigate]);
 
   // Helper to format currency
   const formatIDR = (num) => {
@@ -170,6 +152,51 @@ const Dashboard = () => {
     { label: 'Lainnya', count: categoriesCount.Lainnya, pct: totalActive ? Math.round((categoriesCount.Lainnya / totalActive) * 100) : 0, color: 'var(--color-other)', dotClass: 'dot-other' }
   ];
 
+  // Calculate dynamic Area Chart coordinates from API monthlySavings
+  const monthMap = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const indonesianMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agt', 'Sep', 'Okt', 'Nov', 'Des'];
+
+  const monthlyData = monthMap.map((m, idx) => {
+    // Find all deposits made in this calendar month (across all goals)
+    const monthDeposits = deposits.filter(dep => {
+      if (!dep.date) return false;
+      const depDate = new Date(dep.date);
+      return depDate.getMonth() === idx;
+    });
+
+    const monthTotal = monthDeposits.reduce((sum, dep) => sum + Number(dep.amount || 0), 0);
+
+    return {
+      month: indonesianMonths[idx],
+      total: monthTotal,
+      x: 30 + idx * 40
+    };
+  });
+
+  const maxTotal = Math.max(...monthlyData.map(d => d.total), 15000000); // default to 15M minimum height
+  
+  const getY = (total) => {
+    return 170 - (total / maxTotal) * 135;
+  };
+
+  const formatShortAmount = (num) => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1).replace('.0', '') + ' Jt';
+    if (num >= 1000) return (num / 1000).toFixed(1).replace('.0', '') + ' Rb';
+    return num.toString();
+  };
+
+  // Generate SVG path coordinates
+  const points = monthlyData.map(d => `${d.x},${getY(d.total)}`);
+  const linePathD = `M ${points.join(' L ')}`;
+  const areaPathD = `${linePathD} L 470,170 L 30,170 Z`;
+
+  // Find active dot (use current month)
+  const currentMonthIdx = new Date().getMonth();
+  const activeX = 30 + currentMonthIdx * 40;
+  const activeY = getY(monthlyData[currentMonthIdx].total);
+  const activeMonthLabel = `${months2026[currentMonthIdx].split(' ')[0]} 2026`;
+  const activeMonthTotal = monthlyData[currentMonthIdx].total;
+
   // SVG parameters for donut
   let accumulatedPercent = 0;
 
@@ -178,7 +205,7 @@ const Dashboard = () => {
       {/* HEADER SECTION - Aligned with Referensi_DashboardDLL.png */}
       <div className="dashboard-header-row">
         <div className="header-welcome">
-          <h1>Hi, {currentUser?.name || 'Ade Imah'} 👋</h1>
+          <h1>Hai {(currentUser?.name || 'Ade Imah').replace(/updated/gi, '').trim()} 👋</h1>
           <p className="subtitle">Selamat datang kembali! Semangat menabung hari ini 💪</p>
         </div>
 
@@ -203,57 +230,34 @@ const Dashboard = () => {
           <div className="profile-dropdown-wrapper">
             <div className="profile-control" onClick={() => setIsDropdownOpen(!isDropdownOpen)}>
               <div className="profile-avatar-circle">
-                {currentUser?.name ? currentUser.name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0, 2) : 'AI'}
+                {(currentUser?.name ? currentUser.name.replace(/updated/gi, '').trim() : 'Ade Imah').split(' ').map(n=>n[0]).join('').toUpperCase().slice(0, 2)}
               </div>
-              <span className="profile-name">{currentUser?.name || 'Ade Imah'}</span>
+              <span className="profile-name">{(currentUser?.name || 'Ade Imah').replace(/updated/gi, '').trim()}</span>
               <ChevronDown size={14} className="control-icon" style={{ transform: isDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'var(--transition)' }} />
             </div>
 
             {isDropdownOpen && (
-              <div className="profile-dropdown-menu">
-                <div className="profile-dropdown-header">
-                  <span className="profile-dropdown-header-name">{currentUser?.name || 'Ade Imah'}</span>
-                  <span className="profile-dropdown-header-email">{currentUser?.email}</span>
+              <div className="profile-dropdown-menu" style={{ width: '260px', padding: '1.25rem' }}>
+                <h4 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 700, borderBottom: '1px solid var(--border-light)', paddingBottom: '0.5rem', color: 'var(--text-color)' }}>
+                  Profil Saya
+                </h4>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.875rem' }}>
+                  <div>
+                    <span style={{ color: 'var(--text-light)', display: 'block', fontSize: '0.75rem', fontWeight: 500, textTransform: 'uppercase', marginBottom: '0.25rem' }}>Nama</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text-color)' }}>{(currentUser?.name || 'Ade Imah').replace(/updated/gi, '').trim()}</span>
+                  </div>
+                  
+                  <div>
+                    <span style={{ color: 'var(--text-light)', display: 'block', fontSize: '0.75rem', fontWeight: 500, textTransform: 'uppercase', marginBottom: '0.25rem' }}>Email</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text-color)' }}>{currentUser?.email || 'ade@example.com'}</span>
+                  </div>
+                  
+                  <div>
+                    <span style={{ color: 'var(--text-light)', display: 'block', fontSize: '0.75rem', fontWeight: 500, textTransform: 'uppercase', marginBottom: '0.25rem' }}>Nomor Telepon</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text-color)' }}>{currentUser?.phone || '081234567890'}</span>
+                  </div>
                 </div>
-                
-                <button 
-                  className="dropdown-menu-item"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    setIsProfileModalOpen(true);
-                  }}
-                >
-                  <User size={16} className="brand-text-saving" />
-                  <span>Profil</span>
-                </button>
-                
-                <button 
-                  className="dropdown-menu-item"
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    navigate('/pengaturan');
-                  }}
-                >
-                  <Settings size={16} className="brand-text-goals" />
-                  <span>Pengaturan</span>
-                </button>
-                
-                <button 
-                  className="dropdown-menu-item danger-item"
-                  style={{ borderTop: '1px solid var(--border-light)', marginTop: '4px', paddingTop: '8px' }}
-                  onClick={() => {
-                    setIsDropdownOpen(false);
-                    if (window.confirm('PERINGATAN: Apakah Anda yakin ingin menghapus akun Anda secara permanen? Seluruh target tabungan dan riwayat transaksi akan hilang.')) {
-                      const success = deleteUserAccount();
-                      if (success) {
-                        navigate('/login');
-                      }
-                    }
-                  }}
-                >
-                  <Trash2 size={16} />
-                  <span>Hapus Akun</span>
-                </button>
               </div>
             )}
           </div>
@@ -283,13 +287,13 @@ const Dashboard = () => {
 
         <div className="summary-card summary-card-blue">
           <div className="summary-card-top">
-            <span className="summary-card-title">Rata-rata Setoran</span>
+            <span className="summary-card-title">Rata-rata Progress</span>
             <div className="summary-icon-box">
               <TrendingUp size={20} />
             </div>
           </div>
           <div className="summary-card-bottom">
-            <h3 className="summary-card-value">{formatIDR(stats.averageDeposit)}</h3>
+            <h3 className="summary-card-value">{stats.averageProgress}%</h3>
             <div className="summary-badge-row">
               <span className="summary-badge summary-badge-success">↑ 36%</span>
               <span className="summary-badge-text">dari bulan lalu</span>
@@ -362,10 +366,10 @@ const Dashboard = () => {
               <line x1="30" y1="170" x2="470" y2="170" className="chart-grid-line" />
               
               {/* Y Axis labels */}
-              <text x="5" y="33" className="chart-axis-text">15 Jt</text>
-              <text x="5" y="68" className="chart-axis-text">12 Jt</text>
-              <text x="5" y="103" className="chart-axis-text">9 Jt</text>
-              <text x="5" y="138" className="chart-axis-text">6 Jt</text>
+              <text x="5" y="33" className="chart-axis-text">{formatShortAmount(maxTotal)}</text>
+              <text x="5" y="68" className="chart-axis-text">{formatShortAmount(maxTotal * 0.75)}</text>
+              <text x="5" y="103" className="chart-axis-text">{formatShortAmount(maxTotal * 0.5)}</text>
+              <text x="5" y="138" className="chart-axis-text">{formatShortAmount(maxTotal * 0.25)}</text>
               <text x="5" y="173" className="chart-axis-text">0</text>
               
               {/* X Axis labels */}
@@ -385,26 +389,26 @@ const Dashboard = () => {
               {/* Area Under Curve */}
               <path 
                 className="chart-area-path" 
-                d="M 30,140 C 60,135 60,120 70,115 C 90,110 100,125 110,110 C 130,95 140,115 150,118 C 170,125 180,95 190,95 C 210,95 220,115 230,110 C 250,105 260,105 270,100 C 290,90 300,105 310,108 C 330,110 340,90 350,92 C 370,95 380,85 390,88 C 410,92 420,80 430,82 C 450,85 460,95 470,90 L 470,170 L 30,170 Z" 
+                d={areaPathD} 
               />
               
               {/* Curve Line */}
               <path 
                 className="chart-line-path" 
-                d="M 30,140 C 60,135 60,120 70,115 C 90,110 100,125 110,110 C 130,95 140,115 150,118 C 170,125 180,95 190,95 C 210,95 220,115 230,110 C 250,105 260,105 270,100 C 290,90 300,105 310,108 C 330,110 340,90 350,92 C 370,95 380,85 390,88 C 410,92 420,80 430,82 C 450,85 460,95 470,90" 
+                d={linePathD} 
               />
               
               {/* Mei Guide Line (Dashed) */}
-              <line x1="190" y1="95" x2="190" y2="170" className="chart-vertical-guide" />
+              <line x1={activeX} y1={activeY} x2={activeX} y2="170" className="chart-vertical-guide" />
               
               {/* Active Dot */}
-              <circle cx="190" cy="95" r="5" className="chart-interactive-dot" />
+              <circle cx={activeX} cy={activeY} r="5" className="chart-interactive-dot" />
             </svg>
             
             {/* Chart Tooltip matching Reference exactly */}
-            <div className="chart-tooltip-box" style={{ top: '80px', left: '190px' }}>
-              <span>Mei 2026</span>
-              <span className="chart-tooltip-val">{formatIDR(stats.totalSaved)}</span>
+            <div className="chart-tooltip-box" style={{ top: `${activeY - 45}px`, left: `${activeX}px`, transform: 'translateX(-50%)' }}>
+              <span>{activeMonthLabel}</span>
+              <span className="chart-tooltip-val">{formatIDR(activeMonthTotal)}</span>
               <div className="chart-tooltip-arrow"></div>
             </div>
           </div>
@@ -470,39 +474,42 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Panel 3: Recent Deposits */}
+        {/* Panel 3: Target Terbaru */}
         <div className="panel-card">
           <div className="panel-header">
-            <h2>Setoran Terakhir</h2>
+            <h2>Target Terbaru</h2>
           </div>
 
           <div className="deposit-list-wrapper">
-            {deposits.slice(0, 5).length === 0 ? (
-              <div className="empty-illustration-area">
-                <p>Belum ada catatan setoran masuk.</p>
-              </div>
-            ) : (
-              deposits.slice(0, 5).map((dep) => {
-                const goal = goals.find(g => g.id === dep.goalId);
-                const cat = getGoalCategory(goal ? goal.name : '');
+            {(() => {
+              const latestGoals = dashboardData?.latestGoals || [];
+              if (latestGoals.length === 0) {
+                return (
+                  <div className="empty-illustration-area">
+                    <p>Belum ada target menabung.</p>
+                  </div>
+                );
+              }
+              return latestGoals.map((goal) => {
+                const cat = getGoalCategory(goal.title || goal.name);
                 const IconComponent = cat.icon;
 
                 return (
-                  <div key={dep.id} className="deposit-card-item">
+                  <div key={goal.id} className="deposit-card-item">
                     <div className="deposit-card-left">
                       <div className={`deposit-card-icon-wrapper ${cat.bgClass}`}>
                         <IconComponent size={16} />
                       </div>
                       <div className="deposit-card-info">
-                        <span className="deposit-card-title">{goal ? goal.name : 'Target Dihapus'}</span>
-                        <span className="deposit-card-date">{dep.date}</span>
+                        <span className="deposit-card-title">{goal.title || goal.name}</span>
+                        <span className="deposit-card-date">Target: {formatIDR(goal.targetAmount)}</span>
                       </div>
                     </div>
-                    <span className="deposit-card-amount">+{formatIDR(dep.amount)}</span>
+                    <span className="deposit-card-amount" style={{ color: 'var(--text-color)', fontWeight: '600' }}>{goal.progress}%</span>
                   </div>
                 );
-              })
-            )}
+              });
+            })()}
           </div>
 
           <div className="panel-footer-link" onClick={() => navigate('/goals')}>
@@ -521,139 +528,78 @@ const Dashboard = () => {
           </a>
         </div>
 
-        {goals.length === 0 ? (
-          <div className="panel-card empty-state text-center" style={{ padding: '3.5rem' }}>
-            <Target size={40} style={{ color: 'var(--text-light)', marginBottom: '1rem' }} />
-            <h3>Belum Ada Target Menabung</h3>
-            <p className="subtitle" style={{ marginBottom: '1.5rem' }}>Ayo tentukan target tabungan Anda untuk mulai menabung secara teratur.</p>
-            <button className="btn btn-primary" style={{ margin: '0 auto' }} onClick={() => setIsModalOpen(true)}>
-              <Plus size={16} />
-              <span>Buat Target Pertama</span>
-            </button>
-          </div>
-        ) : (
-          <div className="goals-grid-row">
-            {goals.map((goal) => {
-              const { totalDeposited, percent } = getGoalProgress(goal.id);
-              const estimasi = getEstimasiSelesai(goal.id);
-              const cat = getGoalCategory(goal.name);
-              const IconComponent = cat.icon;
+        {(() => {
+          const myGoals = dashboardData?.myGoals || [];
+          if (myGoals.length === 0) {
+            return (
+              <div className="panel-card empty-state text-center" style={{ padding: '3.5rem' }}>
+                <Target size={40} style={{ color: 'var(--text-light)', marginBottom: '1rem' }} />
+                <h3>Belum Ada Target Menabung</h3>
+                <p className="subtitle">Anda dapat menambahkan target baru melalui halaman Goals List.</p>
+              </div>
+            );
+          }
+          return (
+            <div className="goals-grid-row">
+              {myGoals.map((goal) => {
+                const percent = goal.progress;
+                const totalDeposited = goal.currentAmount;
+                const estimasi = getEstimasiSelesai(goal.id.toString());
+                const cat = getGoalCategory(goal.title || goal.name);
+                const IconComponent = cat.icon;
 
-              return (
-                <div 
-                  key={goal.id} 
-                  className="goal-card-item"
-                  onClick={() => navigate(`/goals/${goal.id}`)}
-                >
-                  <div className="goal-card-item-top">
-                    <div className={`goal-card-icon-box ${cat.bgClass}`}>
-                      <IconComponent size={18} />
+                return (
+                  <div 
+                    key={goal.id} 
+                    className="goal-card-item"
+                    onClick={() => navigate(`/goals/${goal.id}?readOnly=true`)}
+                  >
+                    <div className="goal-card-item-top">
+                      <div className={`goal-card-icon-box ${cat.bgClass}`}>
+                        <IconComponent size={18} />
+                      </div>
+                      <div className="goal-card-title-box">
+                        <h3 className="goal-card-name" title={goal.title || goal.name}>{goal.title || goal.name}</h3>
+                        <p className="goal-card-amount-label">
+                          {formatIDR(totalDeposited)} / {formatIDR(goal.targetAmount)}
+                        </p>
+                      </div>
                     </div>
-                    <div className="goal-card-title-box">
-                      <h3 className="goal-card-name" title={goal.name}>{goal.name}</h3>
-                      <p className="goal-card-amount-label">
-                        {formatIDR(totalDeposited)} / {formatIDR(goal.targetAmount)}
-                      </p>
+
+                    <div className="goal-card-progress-bar-row">
+                      <div className="goal-card-progress-track">
+                        <div 
+                          className="goal-card-progress-fill" 
+                          style={{ width: `${percent}%`, backgroundColor: cat.color }}
+                        ></div>
+                      </div>
+                      <span className="goal-card-percent-text">{percent}%</span>
+                    </div>
+
+                    <div className="goal-card-meta-list">
+                      <div className="goal-card-meta-item">
+                        <span className="goal-card-meta-label">Deadline</span>
+                        <span className="goal-card-meta-value">{goal.deadline}</span>
+                      </div>
+                      <div className="goal-card-meta-item">
+                        <span className="goal-card-meta-label">Est. Tercapai</span>
+                        <span className="goal-card-meta-value">{estimasi.split(' ')[0]} {estimasi.includes('bulan') ? 'bulan lagi' : (estimasi.includes('hari') ? 'hari lagi' : 'lagi')}</span>
+                      </div>
+                    </div>
+
+                    <div className="goal-card-action-row">
+                      <span>Lihat Detail</span>
+                      <span>&gt;</span>
                     </div>
                   </div>
-
-                  <div className="goal-card-progress-bar-row">
-                    <div className="goal-card-progress-track">
-                      <div 
-                        className="goal-card-progress-fill" 
-                        style={{ width: `${percent}%`, backgroundColor: cat.color }}
-                      ></div>
-                    </div>
-                    <span className="goal-card-percent-text">{percent}%</span>
-                  </div>
-
-                  <div className="goal-card-meta-list">
-                    <div className="goal-card-meta-item">
-                      <span className="goal-card-meta-label">Deadline</span>
-                      <span className="goal-card-meta-value">{goal.deadline}</span>
-                    </div>
-                    <div className="goal-card-meta-item">
-                      <span className="goal-card-meta-label">Est. Tercapai</span>
-                      <span className="goal-card-meta-value">{estimasi.split(' ')[0]} {estimasi.includes('bulan') ? 'bulan lagi' : (estimasi.includes('hari') ? 'hari lagi' : 'lagi')}</span>
-                    </div>
-                  </div>
-
-                  <div className="goal-card-action-row">
-                    <span>Lihat Detail & Riwayat</span>
-                    <span>&gt;</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          );
+        })()}
       </section>
 
-      {/* Modal Add Goal (BR-1) */}
-      {isModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-card">
-            <div className="modal-card-header">
-              <h2>Buat Target Menabung Baru</h2>
-              <button className="modal-close-btn" onClick={handleCloseModal}>&times;</button>
-            </div>
-            
-            {error && <div className="alert alert-error">{error}</div>}
 
-            <form onSubmit={handleCreateGoal} className="auth-form">
-              <div className="auth-input-group">
-                <label htmlFor="goalName">Nama Target / Impian</label>
-                <div className="auth-input-wrapper">
-                  <Target size={18} className="auth-field-icon" />
-                  <input
-                    type="text"
-                    id="goalName"
-                    placeholder="Contoh: Beli Laptop, Dana Darurat"
-                    value={goalName}
-                    onChange={(e) => setGoalName(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="auth-input-group">
-                <label htmlFor="targetAmount">Nominal Target (Rp)</label>
-                <div className="auth-input-wrapper">
-                  <DollarSign size={18} className="auth-field-icon" />
-                  <input
-                    type="number"
-                    id="targetAmount"
-                    placeholder="Contoh: 5000000"
-                    value={targetAmount}
-                    onChange={(e) => setTargetAmount(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="auth-input-group">
-                <label htmlFor="deadline">Batas Waktu (Deadline)</label>
-                <div className="auth-input-wrapper">
-                  <Calendar size={18} className="auth-field-icon" />
-                  <input
-                    type="date"
-                    id="deadline"
-                    value={deadline}
-                    onChange={(e) => setDeadline(e.target.value)}
-                    min={new Date().toISOString().split('T')[0]}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="modal-form-actions">
-                <button type="button" className="btn btn-secondary" onClick={handleCloseModal}>Batal</button>
-                <button type="submit" className="btn btn-primary" style={{ backgroundColor: 'var(--blue-primary)' }}>Simpan Target</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
       {/* Profil User Modal */}
       {isProfileModalOpen && (
         <div className="modal-overlay" onClick={() => setIsProfileModalOpen(false)}>

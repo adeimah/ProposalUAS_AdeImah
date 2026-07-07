@@ -24,7 +24,7 @@ const Register = () => {
     setSuccess(null);
   }, [currentUser, navigate, setError, setSuccess]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
     
@@ -53,7 +53,7 @@ const Register = () => {
       return;
     }
 
-    const registered = registerUser(name, email, password);
+    const registered = await registerUser(name, email, password);
     if (registered) {
       setName('');
       setEmail('');

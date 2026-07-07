@@ -2,171 +2,180 @@ import React, { createContext, useState, useEffect } from 'react';
 
 export const AppContext = createContext();
 
-// Helper to get date string in 2026 for consistency
-const getFutureDate2026 = (monthNum) => {
-  // Return formatted date string: YYYY-MM-DD
-  const m = String(monthNum).padStart(2, '0');
-  return `2026-${m}-15`;
-};
-
-// Initial mock data with 2026 dates to align with dashboard dropdowns
-const initialGoals = [
-  {
-    id: 'goal-1',
-    name: 'Dana Darurat Medis',
-    targetAmount: 10000000,
-    deadline: getFutureDate2026(12),
-    createdAt: '2026-01-10',
-    userId: 'user-demo'
-  },
-  {
-    id: 'goal-2',
-    name: 'Liburan Akhir Tahun ke Bali',
-    targetAmount: 8000000,
-    deadline: getFutureDate2026(12),
-    createdAt: '2026-01-15',
-    userId: 'user-demo'
-  },
-  {
-    id: 'goal-3',
-    name: 'Dana Pendidikan S2',
-    targetAmount: 6000000,
-    deadline: getFutureDate2026(7),
-    createdAt: '2026-01-05',
-    userId: 'user-demo'
-  },
-  {
-    id: 'goal-4',
-    name: 'Beli Laptop ASUS ROG',
-    targetAmount: 5000000,
-    deadline: getFutureDate2026(9),
-    createdAt: '2026-02-01',
-    userId: 'user-demo'
-  }
-];
-
-const initialDeposits = [
-  // Deposits for Dana Darurat
-  { id: 'dep-1', goalId: 'goal-1', amount: 3000000, date: '2026-02-12', note: 'Alokasi gajian pertama' },
-  { id: 'dep-2', goalId: 'goal-1', amount: 1000000, date: '2026-05-12', note: 'Nabung Mei 2026' },
-  
-  // Deposits for Bali
-  { id: 'dep-3', goalId: 'goal-2', amount: 2000000, date: '2026-02-10', note: 'Setoran tiket pesawat' },
-  { id: 'dep-4', goalId: 'goal-2', amount: 1000000, date: '2026-05-10', note: 'Nabung bulanan' },
-
-  // Deposits for Dana Pendidikan
-  { id: 'dep-5', goalId: 'goal-3', amount: 1500000, date: '2026-03-09', note: 'Setoran pendidikan' },
-  { id: 'dep-6', goalId: 'goal-3', amount: 500000, date: '2026-05-09', note: 'Nabung bulanan' },
-
-  // Deposits for Laptop
-  { id: 'dep-7', goalId: 'goal-4', amount: 1000000, date: '2026-05-11', note: 'Alokasi Laptop' }
-];
+const API_BASE_URL = 'http://localhost:5000/api';
 
 export const AppProvider = ({ children }) => {
-  const [users, setUsers] = useState(() => {
-    const saved = localStorage.getItem('sg_users');
-    return saved ? JSON.parse(saved) : [
-      { id: 'user-demo', name: 'Ade Imah', email: 'adeimah@gmail.com', password: 'password123' }
-    ];
-  });
-
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('sg_current_user');
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [goals, setGoals] = useState(() => {
-    const saved = localStorage.getItem('sg_goals');
-    return saved ? JSON.parse(saved) : initialGoals;
-  });
+  const [goals, setGoals] = useState([]);
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
 
+  // Local storage for deposits history display (kept local for UX as database doesn't have a Deposit table)
   const [deposits, setDeposits] = useState(() => {
     const saved = localStorage.getItem('sg_deposits');
-    return saved ? JSON.parse(saved) : initialDeposits;
+    return saved ? JSON.parse(saved) : [];
   });
 
-  // Global Toast State for professional notifications
+  // Toast notification state
   const [toast, setToast] = useState({ show: false, type: 'success', message: '' });
 
   const triggerToast = (type, message) => {
     setToast({ show: true, type, message });
-    setTimeout(() => {
-      setToast(prev => ({ ...prev, show: false }));
-    }, 3000);
   };
 
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(null);
-
-  // Sync to local storage
   useEffect(() => {
-    localStorage.setItem('sg_users', JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('sg_current_user', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('sg_current_user');
+    if (toast.show) {
+      const timer = setTimeout(() => {
+        setToast(prev => ({ ...prev, show: false }));
+      }, 3000);
+      return () => clearTimeout(timer);
     }
-  }, [currentUser]);
+  }, [toast.show]);
 
-  useEffect(() => {
-    localStorage.setItem('sg_goals', JSON.stringify(goals));
-  }, [goals]);
-
+  // Persist deposits local state
   useEffect(() => {
     localStorage.setItem('sg_deposits', JSON.stringify(deposits));
   }, [deposits]);
 
-  // Auth Operations
-  const registerUser = (name, email, password) => {
-    setError(null);
-    setSuccess(null);
-
-    const emailExists = users.some(u => u.email.toLowerCase() === email.toLowerCase());
-    if (emailExists) {
-      setError('Email sudah terdaftar.');
-      triggerToast('error', 'Registrasi gagal! Email sudah terdaftar.');
-      return false;
+  // Sync session with localStorage
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('sg_current_user', JSON.stringify(currentUser));
+      fetchGoals();
+      fetchDashboard();
+    } else {
+      localStorage.removeItem('sg_current_user');
+      setGoals([]);
+      setDashboardData(null);
     }
+  }, [currentUser]);
 
-    const newUser = {
-      id: `user-${Date.now()}`,
-      name,
-      email,
-      password
-    };
-
-    setUsers(prev => [...prev, newUser]);
-    triggerToast('success', 'Registrasi berhasil! Silakan login.');
-    return true;
+  // Helper to handle API response errors and session expiration
+  const handleApiResponse = async (response) => {
+    if (response.status === 401) {
+      setCurrentUser(null);
+      triggerToast('error', 'Sesi Anda telah berakhir. Silakan login kembali.');
+      throw new Error('Unauthorized');
+    }
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Terjadi kesalahan pada server.');
+    }
+    return data;
   };
 
-  const loginUser = (email, password) => {
-    setError(null);
-    setSuccess(null);
-
-    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-    if (!user) {
-      setError('Email atau password salah.');
-      triggerToast('error', 'Login gagal! Email atau password salah.');
-      return false;
+  // Fetch Goals from Backend
+  const fetchGoals = async () => {
+    if (!currentUser) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/savings`, {
+        headers: {
+          'Authorization': `Bearer ${currentUser.token}`
+        }
+      });
+      const data = await handleApiResponse(response);
+      if (data.success) {
+        const mapped = data.data.map(item => ({
+          id: item.savingGoal.id.toString(), // cast integer ID to string for components
+          name: item.savingGoal.title,
+          targetAmount: Number(item.savingGoal.targetAmount),
+          currentAmount: Number(item.savingGoal.currentAmount || 0),
+          category: item.savingGoal.category || getGoalCategory(item.savingGoal.title),
+          deadline: item.savingGoal.deadline ? item.savingGoal.deadline.split('T')[0] : '',
+          userId: currentUser?.id?.toString() || ''
+        }));
+        setGoals(mapped);
+      }
+    } catch (err) {
+      console.error('Fetch goals error:', err);
     }
+  };
 
-    const mockToken = `mock-jwt-header.${btoa(JSON.stringify({ id: user.id, email: user.email, name: user.name }))}.mock-signature`;
-    
-    const userSession = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone || '',
-      token: mockToken
-    };
+  // Fetch Dashboard Stats from Backend
+  const fetchDashboard = async () => {
+    if (!currentUser) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/savings/dashboard`, {
+        headers: {
+          'Authorization': `Bearer ${currentUser.token}`
+        }
+      });
+      const data = await handleApiResponse(response);
+      if (data.success) {
+        setDashboardData(data.data);
+      }
+    } catch (err) {
+      console.error('Fetch dashboard error:', err);
+    }
+  };
 
-    setCurrentUser(userSession);
-    triggerToast('success', `Selamat datang kembali, ${user.name}!`);
-    return true;
+  // Auth Operations
+  const registerUser = async (name, email, password) => {
+    setError(null);
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.message || 'Registrasi gagal.');
+        triggerToast('error', data.message || 'Registrasi gagal.');
+        return false;
+      }
+      triggerToast('success', 'Registrasi berhasil! Silakan login.');
+      return true;
+    } catch (err) {
+      setError(err.message || 'Koneksi ke server gagal.');
+      triggerToast('error', err.message || 'Koneksi ke server gagal.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginUser = async (email, password) => {
+    setError(null);
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.message || 'Login gagal.');
+        triggerToast('error', data.message || 'Login gagal! Email atau password salah.');
+        return false;
+      }
+
+      const userSession = {
+        id: data.data.id.toString(),
+        name: data.data.name,
+        email: data.data.email,
+        phone: data.data.phone || '',
+        token: data.data.token
+      };
+
+      setCurrentUser(userSession);
+      triggerToast('success', `Selamat datang kembali, ${data.data.name}!`);
+      return true;
+    } catch (err) {
+      setError(err.message || 'Koneksi ke server gagal.');
+      triggerToast('error', err.message || 'Koneksi ke server gagal.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
   const logoutUser = () => {
@@ -174,149 +183,264 @@ export const AppProvider = ({ children }) => {
     triggerToast('success', 'Anda telah berhasil keluar dari akun.');
   };
 
-  const updateUserProfile = (name, email, phone, newPassword = null) => {
+  const updateUserProfile = async (name, email, phone, newPassword = null) => {
     setError(null);
     if (!currentUser) return false;
+    setLoading(true);
 
-    const emailExists = users.some(
-      u => u.email.toLowerCase() === email.toLowerCase() && u.id !== currentUser.id
-    );
-    if (emailExists) {
-      setError('Email sudah terdaftar pada akun lain.');
-      triggerToast('error', 'Update gagal! Email sudah digunakan.');
-      return false;
-    }
+    try {
+      const body = { name, email, phone };
+      if (newPassword) body.password = newPassword;
 
-    setUsers(prev => prev.map(u => {
-      if (u.id === currentUser.id) {
-        const updated = {
-          ...u,
-          name,
-          email,
-          phone: phone || ''
+      const response = await fetch(`${API_BASE_URL}/users/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentUser.token}`
+        },
+        body: JSON.stringify(body)
+      });
+      const data = await handleApiResponse(response);
+      if (data.success) {
+        const updatedSession = {
+          ...currentUser,
+          name: data.user.name,
+          email: data.user.email,
+          phone: data.user.phone || ''
         };
-        if (newPassword) {
-          updated.password = newPassword;
-        }
-        return updated;
+        setCurrentUser(updatedSession);
+        triggerToast('success', 'Profil dan pengaturan berhasil disimpan!');
+        return true;
       }
-      return u;
-    }));
-
-    setCurrentUser(prev => {
-      if (!prev) return null;
-      return {
-        ...prev,
-        name,
-        email,
-        phone: phone || ''
-      };
-    });
-
-    triggerToast('success', 'Profil dan pengaturan berhasil disimpan!');
-    return true;
+      return false;
+    } catch (err) {
+      setError(err.message || 'Gagal menyimpan profil.');
+      triggerToast('error', err.message || 'Gagal menyimpan profil.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
   const deleteUserAccount = () => {
+    // Note: account deletion can be simulated locally as the backend doesn't have an endpoint for this.
     setError(null);
     if (!currentUser) return false;
-    const userId = currentUser.id;
-
-    // Clean up goals and deposits of this user
-    setGoals(prev => prev.filter(g => g.userId !== userId));
-    setDeposits(prev => {
-      const userGoalIds = goals.filter(g => g.userId === userId).map(g => g.id);
-      return prev.filter(d => !userGoalIds.includes(d.goalId));
-    });
-
-    // Remove user
-    setUsers(prev => prev.filter(u => u.id !== userId));
-
-    // Clear current user
     setCurrentUser(null);
     triggerToast('success', 'Akun Anda berhasil dihapus.');
     return true;
   };
 
+  // Auto categorization helper matching UI
+  const getGoalCategory = (name = '') => {
+    const n = name.toLowerCase();
+    if (n.includes('darurat') || n.includes('medis') || n.includes('emergency')) {
+      return 'Emergency';
+    } else if (n.includes('liburan') || n.includes('bali') || n.includes('wisata')) {
+      return 'Vacation';
+    } else if (n.includes('pendidikan') || n.includes('sekolah') || n.includes('kuliah') || n.includes('belajar')) {
+      return 'Education';
+    } else if (n.includes('laptop') || n.includes('hp') || n.includes('gadget') || n.includes('motor') || n.includes('impian')) {
+      return 'Gadget';
+    } else {
+      return 'Lainnya';
+    }
+  };
+
   // Saving Goals Operations
-  const addGoal = (name, targetAmount, deadline) => {
+  const addGoal = async (name, targetAmount, deadline) => {
     setError(null);
-    if (!currentUser) return false;
+    if (!currentUser) {
+      console.log('[DEBUG Frontend] addGoal aborted - no currentUser');
+      return false;
+    }
+    setLoading(true);
 
-    const targetNum = parseFloat(targetAmount);
-    const newGoal = {
-      id: `goal-${Date.now()}`,
-      name,
-      targetAmount: targetNum,
+    const category = getGoalCategory(name);
+    const url = `${API_BASE_URL}/savings`;
+    const payload = {
+      title: name,
+      targetAmount: parseFloat(targetAmount),
       deadline,
-      createdAt: new Date().toISOString().split('T')[0],
-      userId: currentUser.id
+      category
     };
 
-    setGoals(prev => [newGoal, ...prev]);
-    triggerToast('success', 'Target menabung berhasil dibuat!');
-    return true;
-  };
+    console.log('[DEBUG Frontend] addGoal request starting');
+    console.log('[DEBUG Frontend] url:', url);
+    console.log('[DEBUG Frontend] token:', currentUser.token);
+    console.log('[DEBUG Frontend] payload:', payload);
 
-  const updateGoal = (id, name, targetAmount, deadline) => {
-    setError(null);
-    if (!currentUser) return false;
-
-    const targetNum = parseFloat(targetAmount);
-
-    setGoals(prev => prev.map(goal => {
-      if (goal.id === id && goal.userId === currentUser.id) {
-        return {
-          ...goal,
-          name,
-          targetAmount: targetNum,
-          deadline
-        };
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentUser.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      
+      console.log('[DEBUG Frontend] addGoal response status:', response.status, response.statusText);
+      const data = await handleApiResponse(response);
+      console.log('[DEBUG Frontend] addGoal response data:', data);
+      
+      if (data.success) {
+        await fetchGoals();
+        await fetchDashboard();
+        triggerToast('success', 'Target menabung berhasil dibuat!');
+        return true;
       }
-      return goal;
-    }));
-
-    triggerToast('success', 'Target menabung berhasil diperbarui!');
-    return true;
+      return false;
+    } catch (err) {
+      console.error('[DEBUG Frontend] addGoal caught error:', err);
+      setError(err.message || 'Gagal membuat target menabung.');
+      triggerToast('error', err.message || 'Gagal membuat target menabung.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const deleteGoal = (id) => {
+  const updateGoal = async (id, name, targetAmount, deadline) => {
     setError(null);
     if (!currentUser) return false;
+    setLoading(true);
 
-    setGoals(prev => prev.filter(goal => !(goal.id === id && goal.userId === currentUser.id)));
-    setDeposits(prev => prev.filter(dep => dep.goalId !== id));
-
-    triggerToast('success', 'Target menabung berhasil dihapus.');
-    return true;
+    try {
+      const category = getGoalCategory(name);
+      const response = await fetch(`${API_BASE_URL}/savings/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentUser.token}`
+        },
+        body: JSON.stringify({
+          title: name,
+          targetAmount: parseFloat(targetAmount),
+          deadline,
+          category
+        })
+      });
+      const data = await handleApiResponse(response);
+      if (data.success) {
+        await fetchGoals();
+        await fetchDashboard();
+        triggerToast('success', 'Target menabung berhasil diperbarui!');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      setError(err.message || 'Gagal memperbarui target menabung.');
+      triggerToast('error', err.message || 'Gagal memperbarui target menabung.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Deposits Operations
-  const addDeposit = (goalId, amount, date, note = '') => {
+  const deleteGoal = async (id) => {
     setError(null);
     if (!currentUser) return false;
+    setLoading(true);
 
-    const amountNum = parseFloat(amount);
-    const newDeposit = {
-      id: `dep-${Date.now()}`,
-      goalId,
-      amount: amountNum,
-      date: date || new Date().toISOString().split('T')[0],
-      note
-    };
+    try {
+      const response = await fetch(`${API_BASE_URL}/savings/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${currentUser.token}`
+        }
+      });
+      const data = await handleApiResponse(response);
+      if (data.success) {
+        setDeposits(prev => prev.filter(dep => dep.goalId !== id));
+        await fetchGoals();
+        await fetchDashboard();
+        triggerToast('success', 'Target menabung berhasil dihapus.');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      setError(err.message || 'Gagal menghapus target menabung.');
+      triggerToast('error', err.message || 'Gagal menghapus target menabung.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    setDeposits(prev => [newDeposit, ...prev]);
-    triggerToast('success', 'Setoran tabungan berhasil dicatat!');
-    return true;
+  // Deposits Operations (PUT currentAmount back to SavingGoal model)
+  const addDeposit = async (goalId, amount, date, note = '') => {
+    setError(null);
+    if (!currentUser) return false;
+    setLoading(true);
+
+    try {
+      // Fetch fresh goal detail to find currentAmount directly from the API endpoint
+      const getResponse = await fetch(`${API_BASE_URL}/savings/${goalId}`, {
+        headers: {
+          'Authorization': `Bearer ${currentUser.token}`
+        }
+      });
+      
+      if (!getResponse.ok) {
+        triggerToast('error', 'Target menabung tidak ditemukan.');
+        return false;
+      }
+      
+      const getResData = await getResponse.json();
+      if (!getResData.success || !getResData.data?.savingGoal) {
+        triggerToast('error', 'Target menabung tidak ditemukan.');
+        return false;
+      }
+
+      const freshGoal = getResData.data.savingGoal;
+      const amountNum = parseFloat(amount);
+      const newCurrentAmount = Number(freshGoal.currentAmount || 0) + amountNum;
+
+      // Update backend target amount directly
+      const response = await fetch(`${API_BASE_URL}/savings/${goalId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${currentUser.token}`
+        },
+        body: JSON.stringify({
+          currentAmount: newCurrentAmount
+        })
+      });
+      const data = await handleApiResponse(response);
+      if (data.success) {
+        // Record deposit locally for display in the table logs
+        const newDeposit = {
+          id: `dep-${Date.now()}`,
+          goalId: goalId.toString(),
+          amount: amountNum,
+          date: date || new Date().toISOString().split('T')[0],
+          note
+        };
+        setDeposits(prev => [newDeposit, ...prev]);
+
+        await fetchGoals();
+        await fetchDashboard();
+        triggerToast('success', 'Setoran tabungan berhasil dicatat!');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      setError(err.message || 'Gagal mencatat setoran.');
+      triggerToast('error', err.message || 'Gagal mencatat setoran.');
+      return false;
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Helper calculations
   const getGoalProgress = (goalId) => {
-    const goal = goals.find(g => g.id === goalId);
+    const goal = goals.find(g => g.id === goalId.toString());
     if (!goal) return { totalDeposited: 0, percent: 0, remaining: 0 };
 
-    const goalDeposits = deposits.filter(d => d.goalId === goalId);
-    const totalDeposited = goalDeposits.reduce((sum, dep) => sum + dep.amount, 0);
+    const totalDeposited = Number(goal.currentAmount || 0);
     const percent = Math.min(100, Math.round((totalDeposited / goal.targetAmount) * 100 * 10) / 10);
     const remaining = Math.max(0, goal.targetAmount - totalDeposited);
 
@@ -328,39 +452,48 @@ export const AppProvider = ({ children }) => {
   };
 
   const getStats = () => {
-    if (!currentUser) return { totalSaved: 0, activeGoals: 0, averageDeposit: 0, completedGoals: 0 };
-
-    const userGoals = goals.filter(g => g.userId === currentUser.id);
-    const userGoalIds = userGoals.map(g => g.id);
-    const userDeposits = deposits.filter(d => userGoalIds.includes(d.goalId));
-
-    const totalSaved = userDeposits.reduce((sum, dep) => sum + dep.amount, 0);
+    const totalSaved = goals.reduce((sum, g) => sum + Number(g.currentAmount || 0), 0);
     
-    let completedGoals = 0;
-    userGoals.forEach(g => {
-      const { percent } = getGoalProgress(g.id);
-      if (percent >= 100) completedGoals++;
-    });
+    const activeGoalsCount = goals.filter(g => {
+      const target = Number(g.targetAmount || 0);
+      const current = Number(g.currentAmount || 0);
+      return target > 0 ? (current / target) < 1.0 : true;
+    }).length;
+    
+    const completedGoalsCount = goals.filter(g => {
+      const target = Number(g.targetAmount || 0);
+      const current = Number(g.currentAmount || 0);
+      return target > 0 ? (current / target) >= 1.0 : false;
+    }).length;
 
-    const averageDeposit = userDeposits.length > 0 ? Math.round(totalSaved / userDeposits.length) : 0;
+    const totalProgress = goals.reduce((sum, g) => {
+      const target = Number(g.targetAmount || 0);
+      const current = Number(g.currentAmount || 0);
+      const progress = target > 0 ? Math.round((current / target) * 100) : 0;
+      return sum + progress;
+    }, 0);
+    
+    const averageProgress = goals.length > 0 
+      ? Math.round((totalProgress / goals.length) * 10) / 10 
+      : 0;
 
     return {
       totalSaved,
-      activeGoals: userGoals.length - completedGoals,
-      completedGoals,
-      averageDeposit,
-      depositCount: userDeposits.length
+      activeGoals: activeGoalsCount,
+      completedGoals: completedGoalsCount,
+      averageProgress
     };
   };
 
   const getEstimasiSelesai = (goalId) => {
-    const goal = goals.find(g => g.id === goalId);
+    const goal = goals.find(g => g.id === goalId.toString());
     if (!goal) return 'N/A';
 
     const { remaining } = getGoalProgress(goalId);
     if (remaining <= 0) return 'Tercapai';
 
-    const goalDeposits = deposits.filter(d => d.goalId === goalId);
+    // Estimasi can be calculated dynamically based on local deposit records
+    const goalDeposits = deposits.filter(d => d.goalId === goalId.toString());
     if (goalDeposits.length === 0) return 'Butuh setoran pertama';
 
     const totalGoalSaved = goalDeposits.reduce((sum, dep) => sum + dep.amount, 0);
@@ -369,7 +502,6 @@ export const AppProvider = ({ children }) => {
     if (averageGoalDeposit <= 0) return 'N/A';
 
     const timesNeeded = Math.ceil(remaining / averageGoalDeposit);
-    
     if (goalDeposits.length === 1) {
       return `${timesNeeded} bulan lagi`;
     }
@@ -380,7 +512,7 @@ export const AppProvider = ({ children }) => {
     const diffTime = Math.abs(lastDate - firstDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    const avgDaysBetween = diffDays > 0 ? diffDays / (sortedDeps.length - 1) : 30; // Assume monthly if same day
+    const avgDaysBetween = diffDays > 0 ? diffDays / (sortedDeps.length - 1) : 30;
     const totalDaysNeeded = Math.round(timesNeeded * avgDaysBetween);
 
     if (totalDaysNeeded < 30) {
@@ -404,20 +536,28 @@ export const AppProvider = ({ children }) => {
         setSuccess,
         toast,
         triggerToast,
-        goals: goals.filter(g => currentUser && g.userId === currentUser.id),
+        loading,
+        goals,
         allGoals: goals,
         allDeposits: deposits,
         deposits: deposits.filter(d => {
           if (!currentUser) return false;
-          const userGoalIds = goals.filter(g => g.userId === currentUser.id).map(g => g.id);
+          const userGoalIds = goals.map(g => g.id);
           return userGoalIds.includes(d.goalId);
         }),
+        dashboardData,
+        fetchDashboard,
         registerUser,
         loginUser,
         logoutUser,
         updateUserProfile,
         deleteUserAccount,
-        users,
+        users: currentUser ? [{
+          id: currentUser.id,
+          name: currentUser.name,
+          email: currentUser.email,
+          phone: currentUser.phone || ''
+        }] : [],
         addGoal,
         updateGoal,
         deleteGoal,

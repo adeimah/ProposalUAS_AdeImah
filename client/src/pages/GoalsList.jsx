@@ -1,5 +1,5 @@
-import React, { useState, useContext } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useContext, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import { getGoalCategory } from './Dashboard';
 import { 
@@ -26,6 +26,7 @@ const GoalsList = () => {
   } = useContext(AppContext);
 
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -46,10 +47,20 @@ const GoalsList = () => {
   const [editTargetAmount, setEditTargetAmount] = useState('');
   const [editDeadline, setEditDeadline] = useState('');
 
+  // Handle URL trigger from dashboard/sidebar (?add=true) to open modal
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('add') === 'true') {
+      setIsAddModalOpen(true);
+      // Clean up query param from URL
+      navigate('/goals', { replace: true });
+    }
+  }, [location.search, navigate]);
+
   // Handle Add Goal Submit
-  const handleAddGoal = (e) => {
+  const handleAddGoal = async (e) => {
     e.preventDefault();
-    const done = addGoal(newGoalName, newTargetAmount, newDeadline);
+    const done = await addGoal(newGoalName, newTargetAmount, newDeadline);
     if (done) {
       setNewGoalName('');
       setNewTargetAmount('');
@@ -69,19 +80,19 @@ const GoalsList = () => {
   };
 
   // Handle Edit Goal Submit
-  const handleEditGoal = (e) => {
+  const handleEditGoal = async (e) => {
     e.preventDefault();
-    const done = updateGoal(selectedGoalId, editGoalName, editTargetAmount, editDeadline);
+    const done = await updateGoal(selectedGoalId, editGoalName, editTargetAmount, editDeadline);
     if (done) {
       setIsEditModalOpen(false);
     }
   };
 
   // Handle Delete
-  const handleDeleteGoal = (id, name, e) => {
+  const handleDeleteGoal = async (id, name, e) => {
     e.stopPropagation();
     if (window.confirm(`Apakah Anda yakin ingin menghapus target "${name}" beserta seluruh riwayat setorannya?`)) {
-      deleteGoal(id);
+      await deleteGoal(id);
     }
   };
 

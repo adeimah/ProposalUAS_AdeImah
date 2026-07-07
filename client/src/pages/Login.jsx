@@ -20,9 +20,9 @@ const Login = () => {
     setSuccess(null);
   }, [currentUser, navigate, setError, setSuccess]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const success = loginUser(email, password);
+    const success = await loginUser(email, password);
     if (success) {
       navigate('/dashboard');
     }
